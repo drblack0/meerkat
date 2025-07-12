@@ -2,7 +2,7 @@ package meerkat
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -11,33 +11,70 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
-var (
-	defaultClient   *mongo.Client
-	connectOnce     sync.Once
-	errNotConnected = errors.New("meerkat: not connected to MongoDb, please call meerkat.Connect()")
-)
+type MongoConnection struct {
+	Client *mongo.Client
+	Db     *mongo.Database
+}
 
-func Connect(ctx context.Context, uri string) error {
-	var err error
+// singleton instance
+var instance *MongoConnection
+var once sync.Once
 
-	connectOnce.Do(func() {
-		clientOptions := options.Client().ApplyURI(uri).SetConnectTimeout(10 * time.Second).SetServerSelectionTimeout(30 * time.Second).SetMinPoolSize(5).SetMaxPoolSize((100))
+func Connect(ctx context.Context, uri, dbName string) (*MongoConnection, error) {
+	var connectErr error
 
-		client, innerErr := mongo.Connect(ctx, clientOptions)
+	// once.Do will ensure the connection logic is executed only once
+	// across all goroutines.
+	once.Do(func() {
+		// Set client options
+		clientOptions := options.Client().ApplyURI(uri)
 
-		if innerErr != nil {
-			err = innerErr
+		// Set a timeout for the connection attempt.
+		connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+
+		// Connect to MongoDB
+		client, err := mongo.Connect(connectCtx, clientOptions)
+		if err != nil {
+			connectErr = fmt.Errorf("meerkat: failed to connect to mongo: %w", err)
 			return
 		}
-		if innerErr := client.Ping(ctx, readpref.Primary()); innerErr != nil {
-			err = innerErr
+
+		// Ping the primary to verify the connection.
+		// This is a crucial step to ensure the connection is truly established.
+		pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if err := client.Ping(pingCtx, readpref.Primary()); err != nil {
+			connectErr = fmt.Errorf("meerkat: failed to ping mongo: %w", err)
+			// Disconnect if ping fails to clean up resources
+			_ = client.Disconnect(context.Background())
 			return
 		}
-		defaultClient = client
+
+		fmt.Println("Successfully connected to MongoDB!")
+
+		// Create the singleton instance
+		instance = &MongoConnection{
+			Client: client,
+			Db:     client.Database(dbName),
+		}
 	})
 
-	if defaultClient == nil && err == nil {
-		return errors.New("meerkat: failed to connect to MongoDb but no specific error was returned")
+	if connectErr != nil {
+		return nil, connectErr
 	}
-	return err
+
+	if instance == nil {
+		// This can happen if another goroutine called Connect, but it failed.
+		// We need to reset `once` to allow for another connection attempt.
+		// Note: This is an advanced use case for handling retries at the application level.
+		once = sync.Once{}
+		return nil, fmt.Errorf("meerkat: failed to get mongo instance, connection might have failed previously")
+	}
+
+	return instance, nil
+}
+
+func (mc *MongoConnection) GetCollection(name string) *mongo.Collection {
+	return mc.Db.Collection(name)
 }
