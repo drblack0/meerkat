@@ -51,7 +51,7 @@ func Connect(ctx context.Context, uri, dbName string) (*MongoConnection, error) 
 			return
 		}
 
-		fmt.Println("Successfully connected to MongoDB!")
+		fmt.Println("meerkat: Successfully connected to MongoDB!")
 
 		// Create the singleton instance
 		instance = &MongoConnection{
@@ -77,4 +77,8 @@ func Connect(ctx context.Context, uri, dbName string) (*MongoConnection, error) 
 
 func (mc *MongoConnection) GetCollection(name string) *mongo.Collection {
 	return mc.Db.Collection(name)
+}
+
+func (mc *MongoConnection) GetClient() *mongo.Client {
+	return mc.Client
 }
