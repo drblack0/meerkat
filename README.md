@@ -16,7 +16,7 @@ import (
 	"time"
 
 	// Replace with your actual module path
-	"your-app/database" 
+	"github.com/drblack0/meerkat" 
 
 	"go.mongodb.org/mongo-driver/bson"
 )
@@ -32,7 +32,7 @@ func main() {
 
 	// 2. Connect using the library
 	// This returns a singleton instance. Calling it again will return the same instance.
-	mongoConn, err := database.Connect(ctx, mongoURI, "myAppDB")
+	mongoConn, err := meerkat.Connect(ctx, mongoURI, "myAppDB")
 	if err != nil {
 		log.Fatalf("Could not initialize database connection: %s\n", err)
 	}
